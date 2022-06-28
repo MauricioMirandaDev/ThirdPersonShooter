@@ -15,9 +15,11 @@ ABaseCharacter::ABaseCharacter()
 	// Default values for this class
 	bUseControllerRotationYaw = false;
 	GetCharacterMovement()->bOrientRotationToMovement = true;
-	RotationRate = 100.0f;
-	WalkSpeed = 300.0f;
-	SprintSpeed = 600.0f;
+	GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
+	GamepadRotationRate = 100.0f;
+	WalkSpeed = 150.0f;
+	StandingSprintSpeed = 450.0f;
+	CrouchingSprintSpeed = 300.0f;
 
 	// Create spring arm and set default values
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("Spring Arm"));
@@ -35,6 +37,7 @@ void ABaseCharacter::BeginPlay()
 	Super::BeginPlay();
 
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+	GetCharacterMovement()->MaxWalkSpeedCrouched = WalkSpeed;
 
 	// Limit camera's rotation around y-axis
 	UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewPitchMin = -75.0f;
@@ -65,6 +68,7 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	PlayerInputComponent->BindAxis(TEXT("MoveRight"), this, &ABaseCharacter::MoveRight);
 	PlayerInputComponent->BindAction(TEXT("Sprint"), EInputEvent::IE_Pressed, this, &ABaseCharacter::Sprint);
 	PlayerInputComponent->BindAction(TEXT("Sprint"), EInputEvent::IE_Released, this, &ABaseCharacter::CancelSprint);
+	PlayerInputComponent->BindAction(TEXT("Crouch"), EInputEvent::IE_Pressed, this, &ABaseCharacter::ActivateCrouch);
 }
 
 void ABaseCharacter::MoveForward(float Scale)
@@ -81,20 +85,30 @@ void ABaseCharacter::MoveRight(float Scale)
 
 void ABaseCharacter::LookHorizontalRate(float Scale)
 {
-	AddControllerYawInput(Scale * RotationRate * GetWorld()->GetDeltaSeconds());
+	AddControllerYawInput(Scale * GamepadRotationRate * GetWorld()->GetDeltaSeconds());
 }
 
 void ABaseCharacter::LookVerticalRate(float Scale)
 {
-	AddControllerPitchInput(Scale * RotationRate * GetWorld()->GetDeltaSeconds());
+	AddControllerPitchInput(Scale * GamepadRotationRate * GetWorld()->GetDeltaSeconds());
 }
 
 void ABaseCharacter::Sprint()
 {
-	GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+	GetCharacterMovement()->MaxWalkSpeed = StandingSprintSpeed;
+	GetCharacterMovement()->MaxWalkSpeedCrouched = CrouchingSprintSpeed;
 }
 
 void ABaseCharacter::CancelSprint()
 {
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+	GetCharacterMovement()->MaxWalkSpeedCrouched = WalkSpeed;
+}
+
+void ABaseCharacter::ActivateCrouch()
+{
+	if (!GetCharacterMovement()->IsCrouching())
+		Crouch();
+	else
+		UnCrouch();
 }

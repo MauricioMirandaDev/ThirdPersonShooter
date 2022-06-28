@@ -28,21 +28,30 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
+	// Components for camera control
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
 	USpringArmComponent* SpringArm; 
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* Camera;
 
+	// How fast to rotate camera on gamepad
 	UPROPERTY(EditAnywhere, Category = "Input")
-	float RotationRate;
+	float GamepadRotationRate;
 
-	UPROPERTY(EditAnywhere, Category = "Sprinting")
+	// Speed when walking and crouch walking
+	UPROPERTY(EditAnywhere, Category = "Movement")
 	float WalkSpeed;
 
-	UPROPERTY(EditAnywhere, Category = "Sprinting")
-	float SprintSpeed;
+	// Speed when sprinting while standing
+	UPROPERTY(EditAnywhere, Category = "Movement")
+	float StandingSprintSpeed;
 
+	// Speed when sprinting while crouching
+	UPROPERTY(EditAnywhere, Category = "Movement")
+	float CrouchingSprintSpeed;
+
+	// Functions for movement 
 	void MoveForward(float Scale);
 
 	void MoveRight(float Scale);
@@ -54,4 +63,6 @@ private:
 	void Sprint(); 
 
 	void CancelSprint();
+
+	void ActivateCrouch(); 
 };
