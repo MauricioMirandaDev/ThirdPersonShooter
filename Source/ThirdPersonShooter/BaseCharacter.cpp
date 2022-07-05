@@ -1,6 +1,7 @@
 
 #include "BaseCharacter.h"
 #include "Camera/CameraComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -20,6 +21,10 @@ ABaseCharacter::ABaseCharacter()
 	WalkSpeed = 150.0f;
 	StandingSprintSpeed = 450.0f;
 	CrouchingSprintSpeed = 300.0f;
+	CrouchJumpVelocity = FVector(0.0f, 0.0f, 100.0f);
+	CrouchedCapsuleRadius = 50.0f;
+	bIsSprinting = false;
+	OriginalCapsuleRadius = GetCapsuleComponent()->GetScaledCapsuleRadius();
 
 	// Create spring arm and set default values
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("Spring Arm"));
@@ -42,6 +47,17 @@ void ABaseCharacter::BeginPlay()
 	// Limit camera's rotation around y-axis
 	UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewPitchMin = -75.0f;
 	UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewPitchMax = 45.0f;
+}
+
+void ABaseCharacter::Jump()
+{
+	Super::Jump();
+
+	if (GetCharacterMovement()->IsCrouching())
+	{
+		UnCrouch();
+		LaunchCharacter(CrouchJumpVelocity, false, true);
+	}
 }
 
 // Called every frame
@@ -98,18 +114,30 @@ void ABaseCharacter::Sprint()
 {
 	GetCharacterMovement()->MaxWalkSpeed = StandingSprintSpeed;
 	GetCharacterMovement()->MaxWalkSpeedCrouched = CrouchingSprintSpeed;
+	bIsSprinting = true;
 }
 
 void ABaseCharacter::CancelSprint()
 {
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 	GetCharacterMovement()->MaxWalkSpeedCrouched = WalkSpeed;
+	bIsSprinting = false;
 }
 
 void ABaseCharacter::ActivateCrouch()
 {
 	if (!GetCharacterMovement()->IsCrouching())
+	{	
 		Crouch();
+		GetCapsuleComponent()->SetCapsuleRadius(CrouchedCapsuleRadius, true);
+
+		// Perform an evasive roll if entering crouch from sprint
+		if (bIsSprinting)
+			EvasiveRoll();
+	}
 	else
+	{
 		UnCrouch();
+		GetCapsuleComponent()->SetCapsuleRadius(OriginalCapsuleRadius, true);
+	}
 }

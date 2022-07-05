@@ -23,9 +23,14 @@ public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
+	UFUNCTION(BlueprintImplementableEvent)
+	void EvasiveRoll();
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+
+	virtual void Jump() override; 
 
 private:
 	// Components for camera control
@@ -51,7 +56,14 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Movement")
 	float CrouchingSprintSpeed;
 
-	// Functions for movement 
+	// How high the player jumps from crouch
+	UPROPERTY(EditAnywhere, Category = "Movement")
+	FVector CrouchJumpVelocity;
+
+	UPROPERTY(EditAnywhere, Category = "Movement")
+	float CrouchedCapsuleRadius; 
+
+	// Functions and variables for movement 
 	void MoveForward(float Scale);
 
 	void MoveRight(float Scale);
@@ -65,4 +77,8 @@ private:
 	void CancelSprint();
 
 	void ActivateCrouch(); 
+
+	bool bIsSprinting;
+
+	float OriginalCapsuleRadius;
 };
