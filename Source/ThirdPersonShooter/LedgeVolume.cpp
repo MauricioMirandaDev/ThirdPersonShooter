@@ -1,6 +1,7 @@
 
 #include "LedgeVolume.h"
 #include "BaseCharacter.h"
+#include "ClimbingComponent.h"
 #include "Components/BoxComponent.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -48,8 +49,8 @@ void ALedgeVolume::BeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* Oth
 		float DotProd = FVector::DotProduct(PlayerRef->GetActorForwardVector(), GetActorForwardVector());
 		if (DotProd > -1.0f && DotProd < -0.75f)
 		{
-			FHitResult Target = PlayerRef->ForwardTrace(100.0f);
-			PlayerRef->LedgeGrab(this, Target.ImpactPoint, false);
+			FHitResult Target = PlayerRef->GetClimbingComponent()->ForwardTrace(100.0f);
+			PlayerRef->GetClimbingComponent()->GrabLedge(Target.ImpactPoint, this, false);
 		}
 		
 	}

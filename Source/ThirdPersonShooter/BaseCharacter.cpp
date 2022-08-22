@@ -1,6 +1,7 @@
 
 #include "BaseCharacter.h"
 #include "LedgeVolume.h"
+#include "ClimbingComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -26,10 +27,6 @@ ABaseCharacter::ABaseCharacter()
 	CrouchedCapsuleRadius = 50.0f;
 	bIsSprinting = false;
 	OriginalCapsuleRadius = GetCapsuleComponent()->GetScaledCapsuleRadius();
-	ClimbLedgeAnimation = nullptr;
-	ClimbRightCornerAnimation = nullptr;
-	ClimbLeftCornerAnimation = nullptr;
-	bIsDroppingToLedge = false;
 
 	// Create spring arm and set default values
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("Spring Arm"));
@@ -39,6 +36,10 @@ ABaseCharacter::ABaseCharacter()
 	// Create camera 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm);
+
+	// Create climbing component
+	ClimbingComponent = CreateDefaultSubobject<UClimbingComponent>(TEXT("Climbing Component"));
+	AddOwnedComponent(ClimbingComponent);
 }
 
 // Called when the game starts or when spawned
@@ -52,9 +53,6 @@ void ABaseCharacter::BeginPlay()
 	// Limit camera's rotation around y-axis
 	UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewPitchMin = -75.0f;
 	UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewPitchMax = 45.0f;
-
-	OriginalYawMin = UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewYawMin;
-	OriginalYawMax = UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewYawMax;
 }
 
 void ABaseCharacter::Jump()
@@ -96,60 +94,42 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	PlayerInputComponent->BindAction(TEXT("Jump"), EInputEvent::IE_Pressed, this, &ABaseCharacter::Jump); 
 }
 
+USpringArmComponent* ABaseCharacter::GetSpringArmComponent() const
+{
+	return SpringArm;
+}
+
+UClimbingComponent* ABaseCharacter::GetClimbingComponent() const
+{
+	return ClimbingComponent;
+}
+
 void ABaseCharacter::MoveForward(float Scale)
 {
-	if (!GetCharacterMovement()->IsFlying())
+	switch (GetCharacterMovement()->MovementMode)
 	{
-		FVector ForwardDirection = UKismetMathLibrary::GetForwardVector(FRotator(0.0f, Controller->GetControlRotation().Yaw, 0.0f));
-		AddMovementInput(ForwardDirection, Scale);
-	}
-	else if (Scale > 0.0f)
-	{
-		ClimbLedge();
+		case EMovementMode::MOVE_Flying:
+			if (Scale > 0.0f)
+				ClimbingComponent->ClimbLedge();
+			break;
+		default:
+			FVector ForwardDirection = UKismetMathLibrary::GetForwardVector(FRotator(0.0f, Controller->GetControlRotation().Yaw, 0.0f));
+			AddMovementInput(ForwardDirection, Scale);
+			break;
 	}
 }
 
 void ABaseCharacter::MoveRight(float Scale)
 {
-	if (GetCharacterMovement()->IsFlying())
+	switch (GetCharacterMovement()->MovementMode)
 	{
-		if (Scale > 0.0f)
-		{
-			// Shimmy right
-			if (CanSideShimmy(200.0f, 70.0f))
-				AddMovementInput(GetActorRightVector(), Scale); 
-			// Turn right forwards
-			else if (CanCornerShimmy(TEXT("RightHandSocket"), 50.0f, 25.0f).bBlockingHit)
-			{
-				ClimbCorner(ClimbRightCornerAnimation, CanCornerShimmy(TEXT("RightHandSocket"), 50.0f, 25.0f).GetActor(), 38.0f); 
-			}
-			// Turn right backwards
-			else if (CanCornerShimmy(TEXT("RightHandSocket"), -50.0f, 25.0f).bBlockingHit)
-			{
-				ClimbCorner(ClimbRightCornerAnimation, CanCornerShimmy(TEXT("RightHandSocket"), -50.0f, 25.0f).GetActor(), 52.0f); 
-			}
-		}
-		else if (Scale < 0.0f)
-		{
-			// Shimmy left
-			if (CanSideShimmy(200.0f, -70.0f))
-				AddMovementInput(GetActorRightVector(), Scale); 
-			// Turn left forwards
-			else if (CanCornerShimmy(TEXT("LeftHandSocket"), 50.0f, -25.0f).bBlockingHit)
-			{
-				ClimbCorner(ClimbLeftCornerAnimation, CanCornerShimmy(TEXT("LeftHandSocket"), 50.0f, -25.0f).GetActor(), -38.0f);
-			}
-			// Turn left backwards
-			else if (CanCornerShimmy(TEXT("LeftHandSocket"), -50.0f, -25.0f).bBlockingHit)
-			{
-				ClimbCorner(ClimbLeftCornerAnimation, CanCornerShimmy(TEXT("LeftHandSocket"), -50.0f, -25.0f).GetActor(), -52.0f);
-			}
-		}
-	}
-	else
-	{
-		FVector RightDirection = UKismetMathLibrary::GetRightVector(FRotator(0.0f, Controller->GetControlRotation().Yaw, Controller->GetControlRotation().Roll));
-		AddMovementInput(RightDirection, Scale);
+		case EMovementMode::MOVE_Flying:
+			LedgeShimmy(Scale);
+			break;
+		default:
+			FVector RightDirection = UKismetMathLibrary::GetRightVector(FRotator(0.0f, Controller->GetControlRotation().Yaw, Controller->GetControlRotation().Roll));
+			AddMovementInput(RightDirection, Scale);
+			break;
 	}
 }
 
@@ -182,7 +162,8 @@ void ABaseCharacter::ActivateCrouch()
 	switch (GetCharacterMovement()->MovementMode)
 	{
 		case EMovementMode::MOVE_Flying:
-			ReleaseLedge();
+			ClimbingComponent->ReleaseLedge();
+			CancelSprint();
 			break;
 		default:
 			if (!GetCharacterMovement()->IsCrouching())
@@ -203,147 +184,38 @@ void ABaseCharacter::ActivateCrouch()
 	}
 }
 
-FHitResult ABaseCharacter::ForwardTrace(float Range)
+void ABaseCharacter::LedgeShimmy(float Scale)
 {
-	FHitResult ForwardHitResult;
-	FCollisionQueryParams ForwardQueryParams;
-	ForwardQueryParams.AddIgnoredActor(this);
-
-	GetWorld()->LineTraceSingleByChannel(OUT ForwardHitResult, GetActorLocation(), GetActorLocation() + (GetActorForwardVector() * Range), 
-										 ECollisionChannel::ECC_Visibility, ForwardQueryParams);
-
-	return ForwardHitResult;
-}
-
-FHitResult ABaseCharacter::ClimbUpTrace(float TraceHeight, float TraceLength, float SphereRadius)
-{
-	FHitResult ClimbHitResult;
-	TArray<AActor*> IgnoredActors;
-	IgnoredActors.Add(this);
-
-	UKismetSystemLibrary::SphereTraceSingle(GetWorld(), GetActorLocation() + (GetActorUpVector() * TraceHeight), GetActorLocation() + (GetActorForwardVector() * TraceLength),
-					 SphereRadius, UEngineTypes::ConvertToTraceType(ECollisionChannel::ECC_Visibility), true, IgnoredActors, EDrawDebugTrace::None, OUT ClimbHitResult, true);
-
-	return ClimbHitResult;
-}
-
-bool ABaseCharacter::CanSideShimmy(float UpRange, float SideRange)
-{
-	FHitResult SideHitResult;
-
-	FCollisionQueryParams SideQueryParams;
-	SideQueryParams.AddIgnoredActor(this);
-
-	FCollisionObjectQueryParams ObjectQueryParams;
-	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_GameTraceChannel1);
-
-	return GetWorld()->LineTraceSingleByObjectType(SideHitResult, GetActorLocation(), ((GetActorUpVector() * UpRange) + (GetActorRightVector() * SideRange)) + GetActorLocation(), 
-												   ObjectQueryParams, SideQueryParams);;
-}
-
-FHitResult ABaseCharacter::CanCornerShimmy(FName SocketName, float ForwardRange, float SideRange)
-{
-	FHitResult CornerHitResult;
-
-	FCollisionQueryParams CornerQueryParams;
-	CornerQueryParams.AddIgnoredActor(this);
-
-	FCollisionObjectQueryParams ObjectQueryParams;
-	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_GameTraceChannel1);
-
-	FVector Start = GetMesh()->GetSocketLocation(SocketName) + (GetActorForwardVector() * ForwardRange);
-	FVector End = Start + (GetActorRightVector() * SideRange);
-	GetWorld()->LineTraceSingleByObjectType(OUT CornerHitResult, Start, End, ObjectQueryParams, CornerQueryParams);
-
-	return CornerHitResult;
-}
-
-FHitResult ABaseCharacter::CanDropToLedge()
-{
-	FHitResult DropHitResult;
-
-	TArray<AActor*> ActorsToIgnore;
-	ActorsToIgnore.Add(this);
-
-	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_GameTraceChannel1));
-
-	FVector Start = GetActorLocation() + (GetActorUpVector() * -1.0f * (GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 25.0f));
-	FVector End = Start + (GetActorForwardVector() * -100.0f);
-
-	UKismetSystemLibrary::SphereTraceSingleForObjects(GetWorld(), Start, End, 30.0f, ObjectTypes, true, ActorsToIgnore, EDrawDebugTrace::None, OUT DropHitResult, true);
-
-	return DropHitResult;
-}
-
-void ABaseCharacter::LedgeGrab(AActor* CurrentLedge, FVector TargetLocation, bool bIsLedgeDrop)
-{
-	// Set variables
-	DisableInput(UGameplayStatics::GetPlayerController(GetWorld(), 0));
-	GetCharacterMovement()->StopMovementImmediately();
-	GetCharacterMovement()->SetMovementMode(EMovementMode::MOVE_Flying);
-	GetCharacterMovement()->bOrientRotationToMovement = false;
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	SpringArm->bDoCollisionTest = false;
-
-	// Information for ledge grab
-	FVector GrabLocation = TargetLocation - (GetActorForwardVector() * 5.0f);
-	FLatentActionInfo LatentActionInfo;
-	LatentActionInfo.CallbackTarget = this;
-	FRotator GrabRotation = (CurrentLedge->GetActorForwardVector() * -1.0f).Rotation();
-
-	// Limit camera rotation
-	UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewYawMin = GrabRotation.Yaw - 45.0f;
-	UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewYawMax = GrabRotation.Yaw + 45.0f;
-
-	// Move player to grab ledge
-	if (bIsLedgeDrop)
+	if (Scale > 0.0f)
 	{
-		GrabLocation = TargetLocation + (GetActorForwardVector() * 5.0f);
-
-		PlayAnimMontage(ClimbLeftCornerAnimation, 1.0f, TEXT("None"));
-
-		UKismetSystemLibrary::MoveComponentTo(RootComponent, FVector(GrabLocation.X, GrabLocation.Y, CurrentLedge->GetActorLocation().Z - 115.0f),
-			GrabRotation, true, true, ClimbLeftCornerAnimation->SequenceLength, true, EMoveComponentAction::Move, LatentActionInfo);
+		// Shimmy right
+		if (ClimbingComponent->SideShimmyTrace(200.0f, 70.0f).bBlockingHit)
+			AddMovementInput(GetActorRightVector(), Scale);
+		// Turn right forwards
+		else if (ClimbingComponent->CornerTrace(TEXT("RightHandSocket"), 50.0f, 25.0f).bBlockingHit)
+		{
+			ClimbCorner(ClimbingComponent->ClimbRightCornerAnimation, ClimbingComponent->CornerTrace(TEXT("RightHandSocket"), 50.0f, 25.0f).GetActor(), 38.0f);
+		}
+		// Turn right backwards 
+		else if (ClimbingComponent->CornerTrace(TEXT("RightHandSocket"), -50.0f, 25.0f).bBlockingHit)
+		{
+			ClimbCorner(ClimbingComponent->ClimbRightCornerAnimation, ClimbingComponent->CornerTrace(TEXT("RightHandSocket"), -50.0f, 25.0f).GetActor(), 52.0f);
+		}
 	}
-	else
+	else if (Scale < 0.0f)
 	{
-		UKismetSystemLibrary::MoveComponentTo(RootComponent, FVector(GrabLocation.X, GrabLocation.Y, CurrentLedge->GetActorLocation().Z - 115.0f),
-			GrabRotation, true, true, 0.1f, true, EMoveComponentAction::Move, LatentActionInfo);
-	}
-
-	// Add a delay to stop ignoring input
-	FTimerHandle TimerHandle;
-	GetWorld()->GetTimerManager().SetTimer(TimerHandle, [&]()
-	{
-		EnableInput(UGameplayStatics::GetPlayerController(GetWorld(), 0));
-	}, 1.0f, false);
-}
-
-void ABaseCharacter::ReleaseLedge()
-{
-	UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewYawMin = OriginalYawMin;
-	UGameplayStatics::GetPlayerController(GetWorld(), 0)->PlayerCameraManager->ViewYawMax = OriginalYawMax;
-
-	SpringArm->bDoCollisionTest = true;
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	GetCharacterMovement()->bOrientRotationToMovement = true;
-	GetCharacterMovement()->SetMovementMode(EMovementMode::MOVE_Falling);
-	UnCrouch();
-	CancelSprint();
-}
-
-void ABaseCharacter::ClimbLedge()
-{
-	if (FVector::DotProduct(ClimbUpTrace(200.0f, 150.0f, 30.0f).ImpactNormal, GetActorUpVector()) == 1.0f && ClimbLedgeAnimation)
-		PlayAnimMontage(ClimbLedgeAnimation, 1.0f, TEXT("None"));
-}
-
-void ABaseCharacter::DropToLedge()
-{
-	if (GetVelocity().Length() <= WalkSpeed && CanDropToLedge().bBlockingHit)
-	{
-		if (FVector::DotProduct(CanDropToLedge().GetActor()->GetActorForwardVector(), GetActorForwardVector()))
-			LedgeGrab(CanDropToLedge().GetActor(), CanDropToLedge().ImpactPoint, true);
+		// Shimmy left
+		if (ClimbingComponent->SideShimmyTrace(200.0f, -70.0f).bBlockingHit)
+			AddMovementInput(GetActorRightVector(), Scale);
+		// Turn left forwards 
+		else if (ClimbingComponent->CornerTrace(TEXT("LeftHandSocket"), 50.0f, -25.0f).bBlockingHit)
+		{
+			ClimbCorner(ClimbingComponent->ClimbLeftCornerAnimation, ClimbingComponent->CornerTrace(TEXT("LeftHandSocket"), 50.0f, -25.0f).GetActor(), -38.0f);
+		}
+		// Turn left backwards 
+		else if (ClimbingComponent->CornerTrace(TEXT("LeftHandSocket"), -50.0f, -25.0f).bBlockingHit)
+		{
+			ClimbCorner(ClimbingComponent->ClimbLeftCornerAnimation, ClimbingComponent->CornerTrace(TEXT("LeftHandSocket"), -50.0f, -25.0f).GetActor(), -52.0f);
+		}
 	}
 }

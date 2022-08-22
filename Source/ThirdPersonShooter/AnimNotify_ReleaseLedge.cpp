@@ -1,6 +1,7 @@
 
 #include "AnimNotify_ReleaseLedge.h"
 #include "BaseCharacter.h"
+#include "ClimbingComponent.h"
 #include "Kismet/GameplayStatics.h"
 
 UAnimNotify_ReleaseLedge::UAnimNotify_ReleaseLedge()
@@ -14,6 +15,6 @@ void UAnimNotify_ReleaseLedge::Notify(USkeletalMeshComponent* MeshComp, UAnimSeq
 	if (MeshComp->GetOwner()->IsA(ABaseCharacter::StaticClass()))
 	{
 		PlayerRef = Cast<ABaseCharacter>(MeshComp->GetOwner());
-		PlayerRef->ReleaseLedge();
+		PlayerRef->GetClimbingComponent()->ReleaseLedge();
 	}
 }
